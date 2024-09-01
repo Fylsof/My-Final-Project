@@ -1,127 +1,116 @@
-import {
-  time,
-  loadFixture,
-} from "@nomicfoundation/hardhat-toolbox/network-helpers";
-import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { expect } from "chai";
 import hre from "hardhat";
 
-describe("Lock", function () {
-  // We define a fixture to reuse the same setup in every test.
-  // We use loadFixture to run this setup once, snapshot that state,
-  // and reset Hardhat Network to that snapshot in every test.
-  async function deployOneYearLockFixture() {
-    const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
-    const ONE_GWEI = 1_000_000_000;
+describe("Voting", function () {
+  it("Should mint and vote", async function () {
+    const Voting = await hre.ethers.getContractFactory("VotingSystem");
+    const voting = await Voting.deploy();
+    await voting.waitForDeployment();
 
-    const lockedAmount = ONE_GWEI;
-    const unlockTime = (await time.latest()) + ONE_YEAR_IN_SECS;
+    const [owner, Aziz, notVoter] = await hre.ethers.getSigners();
 
-    // Contracts are deployed using the first signer/account by default
-    const [owner, otherAccount] = await hre.ethers.getSigners();
+    await voting.mint(owner.address, 100);
+    await voting.mint(Aziz.address, 100);
 
-    const Lock = await hre.ethers.getContractFactory("Lock");
-    const lock = await Lock.deploy(unlockTime, { value: lockedAmount });
+    await voting.connect(owner).submitProposal("Proposal 1");
+    await voting.connect(Aziz).submitProposal("Proposal 2");
 
-    return { lock, unlockTime, lockedAmount, owner, otherAccount };
-  }
+    await voting.connect(owner).vote(0, true);
+    await voting.connect(Aziz).vote(1, false);
 
-  describe("Deployment", function () {
-    it("Should set the right unlockTime", async function () {
-      const { lock, unlockTime } = await loadFixture(deployOneYearLockFixture);
+    const proposal1 = await voting.proposals(0);
+    const proposal2 = await voting.proposals(1);
 
-      expect(await lock.unlockTime()).to.equal(unlockTime);
-    });
-
-    it("Should set the right owner", async function () {
-      const { lock, owner } = await loadFixture(deployOneYearLockFixture);
-
-      expect(await lock.owner()).to.equal(owner.address);
-    });
-
-    it("Should receive and store the funds to lock", async function () {
-      const { lock, lockedAmount } = await loadFixture(
-        deployOneYearLockFixture
-      );
-
-      expect(await hre.ethers.provider.getBalance(lock.target)).to.equal(
-        lockedAmount
-      );
-    });
-
-    it("Should fail if the unlockTime is not in the future", async function () {
-      // We don't use the fixture here because we want a different deployment
-      const latestTime = await time.latest();
-      const Lock = await hre.ethers.getContractFactory("Lock");
-      await expect(Lock.deploy(latestTime, { value: 1 })).to.be.revertedWith(
-        "Unlock time should be in the future"
-      );
-    });
+    expect(proposal1.yesVotes).to.equal(1);
+    expect(proposal1.noVotes).to.equal(0);
+    expect(proposal2.yesVotes).to.equal(0);
+    expect(proposal2.noVotes).to.equal(1);
   });
+});
 
-  describe("Withdrawals", function () {
-    describe("Validations", function () {
-      it("Should revert with the right error if called too soon", async function () {
-        const { lock } = await loadFixture(deployOneYearLockFixture);
+it("it's should be allowing voting only users with tokens", async function() { 
+  const Voting = await hre.ethers.getContractFactory("VotingSystem");
+  const voting = await Voting.deploy();
+  await voting.waitForDeployment();
 
-        await expect(lock.withdraw()).to.be.revertedWith(
-          "You can't withdraw yet"
-        );
-      });
+  const [owner, owner1, owner2,owner3,owner4, notVoter] = await hre.ethers.getSigners();
+  // Mint for the belwo users.
+  await voting.mint(owner.address, 100);
+  await voting.mint(owner1.address, 100);
+  await voting.mint(owner2.address, 0);
+  await voting.mint(owner3.address, 100);
+  await voting.mint(owner4.address, 100);
 
-      it("Should revert with the right error if called from another account", async function () {
-        const { lock, unlockTime, otherAccount } = await loadFixture(
-          deployOneYearLockFixture
-        );
+  
 
-        // We can increase the time in Hardhat Network
-        await time.increaseTo(unlockTime);
+  // Execute proposals
+  await voting.connect(owner).submitProposal("Proposal 1");
+  await voting.connect(owner1).submitProposal("Proposal 2");
+  await voting.connect(owner2).submitProposal("Proposal 3");
+  await voting.connect(owner3).submitProposal("Proposal 4");
+  await voting.connect(owner4).submitProposal("Proposal 5");
 
-        // We use lock.connect() to send a transaction from another account
-        await expect(lock.connect(otherAccount).withdraw()).to.be.revertedWith(
-          "You aren't the owner"
-        );
-      });
+  // Valid votes
+  await voting.connect(owner).vote(0, true);
+  await voting.connect(owner1).vote(1, false);
+  await voting.connect(owner2).vote(2, false);
+  await voting.connect(owner3).vote(3, false);
+  await voting.connect(owner4).vote(4, false);
 
-      it("Shouldn't fail if the unlockTime has arrived and the owner calls it", async function () {
-        const { lock, unlockTime } = await loadFixture(
-          deployOneYearLockFixture
-        );
+});
 
-        // Transactions are sent using the first signer by default
-        await time.increaseTo(unlockTime);
 
-        await expect(lock.withdraw()).not.to.be.reverted;
-      });
-    });
 
-    describe("Events", function () {
-      it("Should emit an event on withdrawals", async function () {
-        const { lock, unlockTime, lockedAmount } = await loadFixture(
-          deployOneYearLockFixture
-        );
+it("it's should be allowing five users to propose and votes", async function () {
+  const Voting = await hre.ethers.getContractFactory("VotingSystem");
+  const voting = await Voting.deploy();
+  await voting.waitForDeployment();
 
-        await time.increaseTo(unlockTime);
+  const [owner, owner1, owner2, owner3, owner4, owner5, notVoter] = await hre.ethers.getSigners();
 
-        await expect(lock.withdraw())
-          .to.emit(lock, "Withdrawal")
-          .withArgs(lockedAmount, anyValue); // We accept any value as `when` arg
-      });
-    });
+  // Mint tokens for all the users
+  await voting.mint(owner.address, 100);
+  await voting.mint(owner1.address, 100);
+  await voting.mint(owner2.address, 100);
+  //await voting.mint(owner3.address, 100);
+  //await voting.mint(owner4.address, 100);
+  //await voting.mint(owner5.address, 100);
 
-    describe("Transfers", function () {
-      it("Should transfer the funds to the owner", async function () {
-        const { lock, unlockTime, lockedAmount, owner } = await loadFixture(
-          deployOneYearLockFixture
-        );
+  // Execute the proposals
+  await voting.connect(owner).submitProposal("Proposal 1");
+  await voting.connect(owner1).submitProposal("Proposal 2");
+  await voting.connect(owner2).submitProposal("Proposal 3");
+  //await voting.connect(owner3).submitProposal("Proposal 4");
+ //await voting.connect(owner4).submitProposal("Proposal 5");
 
-        await time.increaseTo(unlockTime);
+  // Votes from the five users..                                
+  await voting.connect(owner).vote(0, true);
+  await voting.connect(owner1).vote(1, false);
+  await voting.connect(owner2).vote(2, false);
+ 
 
-        await expect(lock.withdraw()).to.changeEtherBalances(
-          [owner, lock],
-          [lockedAmount, -lockedAmount]
-        );
-      });
-    });
-  });
+it("it's Should be preventing the users from voting multiple times", async function () {
+  const Voting = await hre.ethers.getContractFactory("VotingSystem");
+  const voting = await Voting.deploy();
+  await voting.waitForDeployment();
+
+  const [owner, owner1, owner2] = await hre.ethers.getSigners();
+
+  // Mint the tokens for the below users..
+  await voting.mint(owner.address, 100);
+  await voting.mint(owner1.address, 100);
+  await voting.mint(owner2.address, 100);
+
+  // Execute the proposals..
+  await voting.connect(owner).submitProposal("Proposal 1");
+  await voting.connect(owner1).submitProposal("Proposal 2");
+  await voting.connect(owner2).submitProposal("Proposal 3");
+
+  // Voters..
+  await voting.connect(owner).vote(0, true);
+  await voting.connect(owner1).vote(1, false);
+  await voting.connect(owner2).vote(2, false);
+
+});
+
 });
